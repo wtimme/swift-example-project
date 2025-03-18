@@ -1,0 +1,8 @@
+[profile my-context-name-PROD]
+sso_session = my-context-name
+sso_account_id = 123456789
+sso_role_name = my-context-name
+[sso-session my-context-name]
+sso_start_url = https://company-sso.awsapps.com/start/#
+sso_region = eu-central-1
+sso_registration_scopes = sso:account:access

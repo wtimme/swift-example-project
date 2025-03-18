@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+# The path to the repository's root directory.
+REPOSITORY_ROOT_DIRECTORY=$(git rev-parse --show-toplevel)
+
+# The path to the `git-format-staged` script
+GIT_FORMAT_STAGED="$REPOSITORY_ROOT_DIRECTORY/tooling/git-format-staged"
+
+function format_staged_swift_files() {
+	echo "Formatting the staged Swift files..."
+
+	"$GIT_FORMAT_STAGED" --formatter "swiftformat stdin --stdinpath '{}'" \
+		"**/*.swift"
+}
+
+format_staged_swift_files
+
+echo "Done formatting. 🧹"

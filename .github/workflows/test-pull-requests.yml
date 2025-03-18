@@ -1,0 +1,53 @@
+name: Test pull requests
+ 
+on:
+  pull_request:
+ 
+jobs:
+  ensure_code_is_formatted:
+    name: Ensure code is formatted
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SwiftFormat from Homebrew
+        run: brew install swiftformat
+      - name: Run SwiftFormat
+        run: swiftformat .
+      - name: Ensure there is no modified code
+        run: |
+          if [[ $(git status --porcelain --untracked-files=no | wc -l) -gt 0 ]]; then
+            echo "It seems that your branch contains unformatted code:"
+            git status --porcelain --untracked-files=no
+            echo "Please run \`swiftformat .\`, commit and push the changes."
+            exit 1
+          fi
+  detect_swiftlint_warnings:
+    name: Detect SwiftLint warnings
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SwiftLint from Homebrew
+        run: brew install swiftlint
+      - name: Run SwiftLint with `--strict`
+        run: swiftlint --strict --quiet
+  run_app_tests:
+    name: Run tests (App)
+    uses: ./.github/workflows/reusable-setup-project-and-run-command.yml
+    secrets: inherit
+    with:
+      run-command: bundle exec fastlane tests scheme:App
+      git-ref: ${{ github.head_ref }}
+  run_framework_tests:
+    name: Run tests (Framework)
+    uses: ./.github/workflows/reusable-setup-project-and-run-command.yml
+    secrets: inherit
+    with:
+      run-command: bundle exec fastlane tests scheme:Framework
+      git-ref: ${{ github.head_ref }}
+  build_release:
+    name: Build with "Release" configuration
+    uses: ./.github/workflows/reusable-setup-project-and-run-command.yml
+    secrets: inherit
+    with:
+      run-command: bundle exec fastlane create_and_sign_release_build
+      git-ref: ${{ github.head_ref }}

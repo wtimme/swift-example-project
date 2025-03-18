@@ -1,0 +1,7 @@
+brew "xcodegen"
+brew "swiftformat"
+brew "swiftgen"
+brew "sourcery"
+brew "black"
+brew "jq"
+brew "awscli"

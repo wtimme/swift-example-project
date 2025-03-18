@@ -1,0 +1,402 @@
+{# -------------------------------------- #}
+{# Helper Macros                          #}
+{# -------------------------------------- #}
+
+{% macro mark string %}
+    // MARK: - {{ string|replace:"handle",""|replace:"present",""|replace:"display",""|lowerFirstLetter }}
+{% endmacro %}
+
+{% macro staticDef def %}{% if def.isStatic %}static {% endif %}{% endmacro %}
+{% macro staticAccess def %}{% if def.isStatic %}type(of: self).{% endif %}{% endmacro %}
+{% macro overrideDef def %}{% if method.definedInType.kind == 'class' %}override {% endif %}{% endmacro %}
+{% macro invokedVarPrefixVar var %}invoked{% call baseNameVar var %}{% endmacro %}
+{% macro stubbedVarPrefixVar var %}stubbed{% call baseNameVar var %}{% endmacro %}
+{% macro invokedVarPrefix method %}invoked{% call baseName method %}{% endmacro %}
+{% macro stubbedVarPrefix method %}stubbed{% call baseName method %}{% endmacro %}
+{% macro baseNameVar var %}{% if var.annotations.mock.altName %}{{ var.annotations.mock.altName|upperFirstLetter }}{% else %}{{ var.name|upperFirstLetter }}{% endif %}{% endmacro %}
+{% macro baseName method %}{% if method.annotations.mock.altName %}{{ method.annotations.mock.altName|upperFirstLetter }}{% else %}{{ method.callName|upperFirstLetter }}{% endif %}{% endmacro %}
+{% macro paramsListDef method %}({% for param in method.parameters %}{% if not param.typeName.isClosure or param.typeName.isOptional or param.typeAttributes.escaping %}{{ param.name }}: {{ param.unwrappedTypeName if param.typeAttributes.escaping else param.typeName }}, {% endif %}{% endfor %}Void){% endmacro %}
+{% macro paramsListCall method %}({% for param in method.parameters %}{% if not param.typeName.isClosure or param.typeName.isOptional or param.typeAttributes.escaping %}{{ param.name }}: {{ param.name }}, {% endif %}{% endfor %}()){% endmacro %}
+
+{% macro typeDeclarationAndDefaultValueAssignment typeName %}{% filter removeNewlines %}
+    {% endfilter %}{{ '(' if typeName.isClosure and not typeName.isOptional }}{{ '(' if typeName.name|contains:"&" and not typeName.isOptional and not typeName.isClosure }}{{ typeName }}{{ ')' if typeName.isClosure and not typeName.isOptional }}{{ ')' if typeName.name|contains:"&" and not typeName.isOptional and not typeName.isClosure }}{% filter removeNewlines|replace:"="," = "|replace:"->"," -> "|replace:",",", " %}
+    {% set defaultLiteral %}{% call defaultValue typeName %}{% endset %}
+    {% if defaultLiteral != "nil" %}
+        {{ ' = ' }}{{ defaultLiteral }}
+    {% else %}
+        {{ '!' if not typeName.isOptional }}
+    {% endif %}
+{% endfilter %}{% endmacro %}
+
+{% macro defaultValue typeName %}{% filter removeNewlines %}
+    {% if typeName.name == 'String' %}
+        {{ '""' }}
+    {% elif typeName.name == 'Int' or typeName.name == 'Int8' or typeName.name == 'Int16' or typeName.name == 'Int32' or typeName.name == 'Int64' %}
+        {{ '0' }}
+    {% elif typeName.name == 'UInt' or typeName.name == 'UInt8' or typeName.name == 'UInt16' or typeName.name == 'UInt32' or typeName.name == 'UInt64' %}
+        {{ '0' }}
+    {% elif typeName.name == 'Double' or typeName.name == 'Float' %}
+        {{ '0.0' }}
+    {% elif typeName.name == 'Bool' %}
+        {{ 'false' }}
+    {% elif typeName.name == 'Void' %}
+        {{ '()' }}
+    {% elif typeName.isGeneric and typeName.generic.name == "AnyPublisher" %}
+        {% set defaultLiteral %}{% call defaultValue typeName.generic.typeParameters.first.typeName %}{% endset %}
+        {% if defaultLiteral != "nil" %}
+        AnyPublisher.success({{ defaultLiteral }})
+        {% else %}
+        {{ 'nil' }}
+        {% endif %}
+    {% elif typeName.isGeneric and typeName.generic.name == "Result" %}
+        {% set defaultLiteral %}{% call defaultValue typeName.generic.typeParameters.first.typeName %}{% endset %}
+        {% if defaultLiteral != "nil" %}
+        Result.success({{ defaultLiteral }})
+        {% else %}
+        {{ 'nil' }}
+        {% endif %}
+    {% elif typeName.isArray %}
+        {{ '[]' }}
+    {% elif typeName.isDictionary %}
+        {{ '[:]' }}
+    {% else %}
+        {{ 'nil' }}
+    {% endif %}
+{% endfilter %}{% endmacro %}
+
+{# -------------------------------------- #}
+{# Main Macros                            #}
+{# -------------------------------------- #}
+{# -------------------- #}
+{# Mock Property        #}
+{# -------------------- #}
+
+{# Macros for the callIds that are being used when logging method calls using `CallLogging` #}
+{% macro getterCallIdConstantName var %}{{ var.name }}GetterCallId{% endmacro %}
+{% macro getterCallIdConstant var %}public {% call staticDef var %}static let {% call getterCallIdConstantName var %} = "{{ type.name }}.get{{ var.name|upperFirstLetter }}"{% endmacro %}
+{% macro setterCallIdConstantName var %}{{ var.name }}SetterCallId{% endmacro %}
+{% macro setterCallIdConstant var %}public {% call staticDef var %}static let {% call setterCallIdConstantName var %} = "{{ type.name }}.set{{ var.name|upperFirstLetter }}"{% endmacro %}
+{% macro methodCallIdConstantName method %}{% set methodBaseName %}{% call baseName method %}{% endset %}{{ methodBaseName|lowerFirstLetter }}CallId{% endmacro %}
+{% macro methodCallIdConstant method %}public {% set methodBaseName %}{% call baseName method %}{% endset %}static let {% call methodCallIdConstantName method %} = "{{ type.name }}.{{ methodBaseName|lowerFirstLetter }}"{% endmacro %}
+
+{# Macros for actually logging the calls #}
+{# Note that logging static functions and properties is NOT supported. #}
+{% macro logGetter var %}{% if var.isStatic == false %}callLogger?.logCall(Self.{% call getterCallIdConstantName var %}){% endif %}{% endmacro %}
+{% macro logSetter var %}{% if var.isStatic == false %}callLogger?.logCall(Self.{% call setterCallIdConstantName var %}){% endif %}{% endmacro %}
+{% macro logMethod method %}{% if method.isStatic == false %}callLogger?.logCall(Self.{% call methodCallIdConstantName method %}){% endif %}{% endmacro %}
+
+{% macro getter var %}
+        defer {
+            {% call logGetter var %}
+
+            {% call invokedVarPrefixVar var %}GetterExpectation?.fulfill()
+        }
+        {% call invokedVarPrefixVar var %}Getter = true
+        {% call invokedVarPrefixVar var %}GetterCount += 1
+        return {% call stubbedVarPrefixVar var %}
+{% endmacro %}
+
+{% macro mockProperty var %}
+    {% call mark var.name %}
+
+    {% if var.isStatic == false %}
+      {% call getterCallIdConstant var %}
+      {% if var.isMutable %}
+        {% call setterCallIdConstant var %}
+      {% endif %}
+    {% endif %}
+
+    public {% call staticDef var %}private(set) var {% call invokedVarPrefixVar var %}Getter = false
+    public {% call staticDef var %}private(set) var {% call invokedVarPrefixVar var %}GetterCount = 0
+    public {% call staticDef var %}private(set) var {% call invokedVarPrefixVar var %}GetterExpectation: XCTestExpectation?
+    {% if var.isMutable %}
+    public {% call staticDef var %}private(set) var {% call invokedVarPrefixVar var %}Setter = false
+    public {% call staticDef var %}private(set) var {% call invokedVarPrefixVar var %}SetterCount = 0
+    public {% call staticDef var %}private(set) var {% call invokedVarPrefixVar var %}Parameter: {% if var.typeName.isClosure %}({% endif %}{{ var.typeName.unwrappedTypeName }}{% if var.typeName.isClosure %}){% endif %}?
+    public {% call staticDef var %}private(set) var {% call invokedVarPrefixVar var %}ParameterList = [{{ var.typeName.name }}]()
+    public {% call staticDef var %}var {% call invokedVarPrefixVar var %}SetterExpectation: XCTestExpectation?
+    {% endif %}
+    public {% call staticDef var %}var {% call stubbedVarPrefixVar var %}: {% call typeDeclarationAndDefaultValueAssignment var.typeName %}
+
+    public {% call staticDef var %}var {{ var.name }}: {{ var.typeName }} {
+        {% if var.isMutable %}
+        get {
+            {% filter indent %}{% call getter var %}{% endfilter %}
+        }
+        set {
+            defer {
+                {% call logSetter var %}
+
+                {% call invokedVarPrefixVar var %}SetterExpectation?.fulfill()
+            }
+            {% call invokedVarPrefixVar var %}Parameter = newValue
+            {% call invokedVarPrefixVar var %}ParameterList.append(newValue)
+            {% call invokedVarPrefixVar var %}Setter = true
+            {% call invokedVarPrefixVar var %}SetterCount += 1
+            {% call stubbedVarPrefixVar var %} = newValue
+        }
+        {% else %}
+        {% call getter var %}
+        {% endif %}
+    }
+{% endmacro %}
+
+{# ------------------------ #}
+{# Mock Method              #}
+{# ------------------------ #}
+
+{% macro throwIfStubbedError method %}
+    {% if method.throws %}
+        if let error = {% call stubbedVarPrefix method %}Error {
+            throw error
+        }
+    {% endif %}
+{% endmacro %}
+
+{% macro resultProviderName method %}{% call stubbedVarPrefix method %}ResultProvider{% endmacro %}
+
+{% macro resultProviderParamDeclaration method %}{% for param in method.parameters %}_ {{ param.name }}: {{ param.typeName }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endmacro %}
+
+{% macro resultProviderReturnType method %}{% if method.isInitializer %}Void{% else %}{{ method.returnTypeName.name }}{% endif %}{% endmacro %}
+
+{% macro resultProviderParameters method %}{% for param in method.parameters %}{{ param.name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endmacro %}
+
+{% macro declareParametersVarIfHasEscaping method %}
+    {% set escapingParameters %}{% filter removeNewlines %}
+    {% for param in method.parameters %}
+    {% if not param.typeName.isClosure or param.typeName.isOptional or param.typeAttributes.escaping %}
+        1
+    {% endif %}
+    {% endfor %}
+    {% endfilter %}{% endset %}
+    {% if escapingParameters %}
+
+
+    /// Use this to verify the parameters of the last invocation of `{{ method.callName }}(...)`.
+    public {% call staticDef method %} var {% call invokedVarPrefix method %}Parameters: {% call paramsListDef method %}? {
+        {% call invokedVarPrefix method %}ParametersList.last
+    }
+
+    /// Use this when `{{ method.callName }}(...)` is called _multiple_ times
+    /// and you want to verify the parameters of each invocation.
+    /// 
+    /// If you are only interested in one single invocation, please use `{% call invokedVarPrefix method %}Parameters` instead.
+    public {% call staticDef method %}private(set) var {% call invokedVarPrefix method %}ParametersList = [{% call paramsListDef method %}]()
+    {% endif %}
+{% endmacro %}
+
+{% macro setParametersVarIfHasEscaping method %}
+    {% set escapingParameters %}{% filter removeNewlines %}
+    {% for param in method.parameters %}
+    {% if not param.typeName.isClosure or param.typeName.isOptional or param.typeAttributes.escaping %}
+        1
+    {% endif %}
+    {% endfor %}
+    {% endfilter %}{% endset %}
+    {% if escapingParameters %}
+        {% call invokedVarPrefix method %}ParametersList.append({% call paramsListCall method %})
+    {% endif %}
+{% endmacro %}
+
+{% macro closureParameter p %}
+{% if p.typeName|contains:"any " %}({% endif %}{% if p.typeName|contains:"any " %}{{ p.typeName|replace:"@escaping ",""|replace:"?",")?" }}{% else %}{{ p.typeName|replace:"@escaping ","" }}{% endif %}, 
+{% endmacro %}
+
+{# Adds documentation for the `stubbed<METHOD>Result` properties #}
+{% macro documentationForStubbedResult method %}
+/// Use this property to control the return value of `{{ method.callName }}(...)`.
+{% endmacro %}
+
+{% macro mockMethod method %}
+    {% call mark method.callName %}
+
+    {% call methodCallIdConstant method %}
+
+    public {% call staticDef method %}private(set) var {% call invokedVarPrefix method %} = false
+    public {% call staticDef method %}private(set) var {% call invokedVarPrefix method %}Count = 0
+    {% call declareParametersVarIfHasEscaping method %}
+    public {% call staticDef method %}var {% call invokedVarPrefix method %}Expectation: XCTestExpectation?
+    {% if not method.returnTypeName.isVoid %}
+
+    
+    {% call documentationForStubbedResult method %}
+    public {% call staticDef method %}var {% call stubbedVarPrefix method %}Result: {% call typeDeclarationAndDefaultValueAssignment method.returnTypeName %}
+    {% endif %}
+    {% for param in method.parameters %}{% if param.typeName.isClosure and param.typeName.closure.parameters.count > 0 %}
+    public {% call staticDef method %}var {% call stubbedVarPrefix method %}{{ param.name|upperFirstLetter }}Input: ({% for p in param.typeName.closure.parameters %}{% call closureParameter p %}{% endfor %}Void)?
+    {% endif %}{% endfor %}
+    {% if method.throws %}
+    public {% call staticDef method %} var {% call stubbedVarPrefix method %}Error: Error?
+    {% endif %}
+    {% if method.parameters.count > 0 %}
+    public {% call staticDef method %}var {% call resultProviderName method %}: (({% call resultProviderParamDeclaration method %}) {% if method.throws %}throws {% endif %}-> {% call resultProviderReturnType method %})?
+    {% endif %}
+
+    public {% call overrideDef method %}{% call staticDef method %}func {{ method.name }}{{ ' throws' if method.throws }}{% if not method.returnTypeName.isVoid %} -> {{ method.returnTypeName }}{% endif %} {
+        defer {
+            {% call logMethod method %}
+
+            {% call invokedVarPrefix method %}Expectation?.fulfill()
+        }
+        {% call invokedVarPrefix method %} = true
+        {% call invokedVarPrefix method %}Count += 1
+        {% call setParametersVarIfHasEscaping method %}
+        {% for param in method.parameters %}{% if param.typeName.isClosure and param.typeName.closure.parameters.count > 0 %}
+        if let input = {% call stubbedVarPrefix method %}{{ param.name|upperFirstLetter }}Input {
+            _ = {{ param.name }}{{ '?' if param.typeName.isOptional }}({% for p in param.typeName.closure.parameters %}input.{{ forloop.counter0 }}{{ ', ' if not forloop.last }}{% endfor %})
+        }
+        {% endif %}{% endfor %}
+        {% if method.returnTypeName.isVoid %}
+        {% if method.parameters.count > 0 %}
+        {% if method.throws %}try {% endif %}{% call resultProviderName method %}?({% call resultProviderParameters method %})
+        {% endif %}
+        {% if method.throws %}
+        {% call throwIfStubbedError method %}
+        {% endif %}
+        {% else %}
+        {% if method.parameters.count > 0 %}
+        let result: {{ method.returnTypeName}}
+        if let resultProvider = {% call resultProviderName method %} {
+            result = {{ 'try ' if method.throws }}resultProvider({% call resultProviderParameters method %})
+            {% filter indent %}{% call throwIfStubbedError method %}{% endfilter %}
+        } else {
+            {% filter indent %}{% call throwIfStubbedError method %}{% endfilter %}
+            /// Did you encounter "Fatal error: Unexpectedly found nil while implicitly unwrapping an Optional value"?
+            /// Consider setting a stubbed return value for this method via `{% call stubbedVarPrefix method %}Result`.
+            result = {% call stubbedVarPrefix method %}Result
+        }
+        return result
+        {% else %}
+        {% call throwIfStubbedError method %}
+        return {% call stubbedVarPrefix method %}Result
+        {% endif %}
+        {% endif %}
+    }
+{% endmacro %}
+
+
+{# -------------------------- #}
+{# Generates resetMock method #}
+{# -------------------------- #}
+
+{% macro resetParametersVarIfHasEscaping method %}
+    {% set escapingParameters %}{% filter removeNewlines %}
+    {% for param in method.parameters %}
+    {% if not param.typeName.isClosure or param.typeName.isOptional or param.typeAttributes.escaping %}
+        1
+    {% endif %}
+    {% endfor %}
+    {% endfilter %}{% endset %}
+    {% if escapingParameters %}
+        {% call staticAccess method %}{% call invokedVarPrefix method %}ParametersList = [{% call paramsListDef method %}]()
+    {% endif %}
+{% endmacro %}
+
+{% macro resetMethod type %}
+    {% call mark "Reset Mock" %}
+
+    public func resetMock(includingStubbedData: Bool = false) {
+    {% for var in type.allVariables|!definedInExtension %}
+    {% if not var.annotations.mock.skip %}
+    {% if var.readAccess != "private" and var.writeAccess != "private" %}
+    {% if var.definedInTypeName.name != type.typeName.name %}
+        {% call staticAccess var %}{% call invokedVarPrefixVar var %}Getter = false
+        {% call staticAccess var %}{% call invokedVarPrefixVar var %}GetterCount = 0
+        {% call staticAccess var %}{% call invokedVarPrefixVar var %}GetterExpectation = nil
+        {% if var.isMutable %}
+        {% call staticAccess var %}{% call invokedVarPrefixVar var %}Setter = false
+        {% call staticAccess var %}{% call invokedVarPrefixVar var %}SetterCount = 0
+        {% call staticAccess var %}{% call invokedVarPrefixVar var %}SetterExpectation = nil
+        {% call staticAccess var %}{% call invokedVarPrefixVar var %}Parameter = nil
+        {% call staticAccess var %}{% call invokedVarPrefixVar var %}ParameterList = [{{ var.typeName.name }}]()
+        {% endif %}
+        {% call staticAccess var %}{% call stubbedVarPrefixVar var %} = includingStubbedData ? {% call defaultValue var.typeName %} : {% call staticAccess var %}{% call stubbedVarPrefixVar var %}
+    {% endif %}
+    {% endif %}
+    {% endif %}
+    {% endfor %}
+    {% for method in type.allMethods|!definedInExtension %}
+    {% if not method.annotations.mock.skip %}
+    {% if not method.annotations.mock.customReset %}
+    {% if method.accessLevel != "private" %}
+    {% if method.definedInTypeName.name != type.typeName.name %}
+    {% if not method.isInitializer %}
+        {% call staticAccess method %}{% call invokedVarPrefix method %} = false
+        {% call staticAccess method %}{% call invokedVarPrefix method %}Count = 0
+        {% call resetParametersVarIfHasEscaping method %}
+        {% call staticAccess method %}{% call invokedVarPrefix method %}Expectation = nil
+    {% for parameter in method.parameters %}{% if parameter.typeName.isClosure and parameter.typeName.closure.parameters.count > 0 %}
+        {% call staticAccess method %}{% call stubbedVarPrefix method %}{{ parameter.name|upperFirstLetter }}Input = includingStubbedData ? nil : {% call staticAccess method %}{% call stubbedVarPrefix method %}{{ parameter.name|upperFirstLetter }}Input
+    {% endif %}{% endfor %}
+    {% if method.returnTypeName.name != "Void" %}
+        {% call staticAccess method %}{% call stubbedVarPrefix method %}Result = includingStubbedData ? {% call defaultValue method.returnTypeName %} : {% call staticAccess method %}{% call stubbedVarPrefix method %}Result
+    {% if method.throws %}
+        {% call staticAccess method %}{% call stubbedVarPrefix method %}Error = includingStubbedData ? nil : {% call staticAccess method %}{% call stubbedVarPrefix method %}Error
+    {% endif %}
+    {% if method.parameters.count > 0 %}
+        {% call staticAccess method %}{% call stubbedVarPrefix method %}ResultProvider = includingStubbedData ? nil : {% call staticAccess method %}{% call stubbedVarPrefix method %}ResultProvider
+    {% endif %}
+    {% endif %}
+    {% endif %}
+    {% endif %}
+    {% endif %}
+    {% endif %}
+    {% endif %}
+    {% endfor %}
+    {% for method in type.methods %}
+    {% if method.annotations.mock.customReset %}
+
+        {% if method.parameters.count == 1 and method.parameters.first.typeName.name == "Bool" %}
+        {{ method.callName }}({{ method.parameters.first.name }}: includingStubbedData)
+        {% else %}
+        {{ method.callName }}()
+        {% endif %}
+    {% endif %}
+    {% endfor %}
+    }
+{% endmacro %}
+
+
+{# -------------------------------------- #}
+{# Generate inline mocks                  #}
+{# -------------------------------------- #}
+
+{% for type in types.all where type|annotated:"mock_inline" %}
+// sourcery:inline:{{ type.name }}.mock
+// swiftlint:disable all
+
+public var callLogger: CallLogging?
+public func setupToLogCalls(with callLogger: CallLogging) -> Self {
+    self.callLogger = callLogger
+
+    return self
+}
+
+{% for variable in type.allVariables|!definedInExtension %}
+{% if not variable.annotations.mock.skip %}
+{# Skip if any is private since it's not possible to define private vars in protocols that are private #}
+{% if variable.readAccess != "private" and variable.writeAccess != "private" %}
+{% if variable.definedInTypeName.name != type.typeName.name %}
+
+{% call mockProperty variable %}
+{% endif %}
+{% endif %}
+{% endif %}
+{% endfor %}
+{% for method in type.allMethods|!definedInExtension|!initializer %}
+{% if not method.annotations.mock.skip %}
+{% if not method.annotations.mock.customReset %}
+{% if method.accessLevel != "private" %}
+{% if method.definedInTypeName.name != type.typeName.name %}
+
+{% call mockMethod method %}
+{% endif %}
+{% endif %}
+{% endif %}
+{% endif %}
+{% endfor %}
+
+{% call resetMethod type %}
+// swiftlint:enable all
+// sourcery:end
+{% endfor %}

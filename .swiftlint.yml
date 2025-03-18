@@ -1,0 +1,8 @@
+nesting:
+  type_level: 2
+disabled_rules:
+  - trailing_whitespace
+  - trailing_comma
+excluded:
+  - vendor
+  - App/Generated

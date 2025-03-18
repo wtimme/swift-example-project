@@ -1,0 +1,161 @@
+opt_out_usage
+
+#####################
+# CONFIGURATION
+#####################
+
+APP_BUNDLE_IDENTIFIER = "de.wtimme.example.App".freeze
+WILDCARD_BUNDLE_IDENTIFIER = "de.wtimme.example.*".freeze
+APP_STORE_CONNECT_API_KEY_ISSUER_ID = "0a0aa000-0000-00a0-a00a-00a0a0a0000a".freeze
+APP_STORE_CONNECT_API_KEY_ID = "0AAA00AAAA".freeze
+DEVICE_TO_RUN_TESTS_WITH = "iPad (10th generation) (18.2)".freeze
+APP_TARGET_NAME = "App".freeze
+
+setup_ci if ENV['CI']
+
+#####################
+# TESTING LANES
+#####################
+
+desc 'Runs the tests'
+desc ''
+desc 'Use the `scheme` parameter to select the scheme that should be tested.'
+lane :tests do |options|
+  run_tests(
+    device: DEVICE_TO_RUN_TESTS_WITH,
+    output_types: 'junit',
+    scheme: options[:scheme],
+    xcargs: ['-skipPackagePluginValidation']
+  )
+end
+
+#####################
+# DEPLOYMENT LANES
+#####################
+
+desc("Creates and uploads a new build to TestFlight")
+lane :create_and_upload_testflight_build do
+  create_api_key
+  increment_testflight_build_number
+  create_and_sign_release_build
+  upload_to_testflight(
+    groups: ['Internal Alpha'],
+    submit_beta_review: false
+  )
+  add_and_push_release_tag(channel: 'alpha')
+end
+
+desc("Sets up signing and builds the app with the 'Release' configuration")
+lane :create_and_sign_release_build do
+  setup_code_signing(type: "appstore")
+  build_app(
+    scheme: "App",
+    configuration: "Release",
+    xcargs: ['-skipPackagePluginValidation']
+  )
+end
+
+#####################
+# CODESIGNING LANES
+#####################
+
+desc(
+  "Fetch codesigning assets." +
+  "\n" +
+  "\nBy default, this lane fetches the certificate and provisioning profile for development, and performs read-only operations." +
+  "\nUse `readonly:false` to update assets on https://developer.apple.com/ and the Git repository used for fastlane Match." +
+  "\nExample: `fastlane setup_code_signing readonly:false`"
+)
+lane :setup_code_signing do |options|
+  type = options.fetch(:type, "development")
+  readonly = options.fetch(:readonly, true)
+
+  if !readonly
+    create_api_key
+  end
+
+  # Only the main app target is deployed through TestFlight. For development of other targets
+  # (and for running them on a test device), a wilcard certificate is used.
+  app_identifier = (type == "development") ? [WILDCARD_BUNDLE_IDENTIFIER] : [APP_BUNDLE_IDENTIFIER]
+
+  match(
+    type: type,
+    app_identifier: app_identifier,
+    readonly: readonly,
+    force_for_new_devices: true
+  )
+end
+
+desc 'Creates a new "Development" certificate'
+desc 'Use this lane to re-generate the certificate in case the existing one is about to expire.'
+lane :create_development_certificate do
+  create_api_key
+
+  get_certificates(
+    development: true,
+    generate_apple_certs: true,
+    force: true,
+    username: 'app-management@company.com',
+    team_id: 'AA0A00A0AA',
+    team_name: 'Company, Inc.',
+    filename: 'development'
+  )
+end
+
+#####################
+# METADATA LANES
+#####################
+
+desc 'Re-generates the app icon from a 1024x1024 template image.'
+desc 'Requires the GraphicsMagick library to be installed on your machine (`brew install graphicsmagick`).'
+lane :generate_app_icon do
+  appicon(
+    appicon_path: 'App/Resources/Assets.xcassets',
+    appicon_devices: [:ipad, :iphone, :ios_marketing]
+  )
+end
+
+#####################
+# PRIVATE LANES
+#####################
+
+private_lane :create_api_key do |options|
+  # For CI runs, the API key is provided as part of the environment
+  key_content = ENV["APP_STORE_CONNECT_API_KEY_CONTENT"]
+
+  if key_content.nil?
+    filepath = prompt(
+      text: "Path to the App Store Connect API key file: "
+    )
+  end
+
+  app_store_connect_api_key(
+    key_id: APP_STORE_CONNECT_API_KEY_ID,
+    issuer_id: APP_STORE_CONNECT_API_KEY_ISSUER_ID,
+    key_content: key_content,
+    key_filepath: filepath,
+    duration: 1200
+  )
+end
+
+private_lane :increment_testflight_build_number do |options|
+  latest_build_number = latest_testflight_build_number(
+    app_identifier: APP_BUNDLE_IDENTIFIER,
+    initial_build_number: 0
+  )
+
+  increment_build_number(
+    build_number: latest_build_number + 1
+  )
+end
+
+desc 'Adds and pushes a release tag. The tag can have an optional "channel" prefix.'
+desc 'Example: `fastlane add_and_push_release_tag channel:alpha`'
+private_lane :add_and_push_release_tag do |options|
+  version_number = get_version_number(target: APP_TARGET_NAME)
+  optional_channel_prefix = options.key?(:channel) ? "#{options[:channel]}/" : ""
+  tag = "#{optional_channel_prefix}#{version_number}/#{get_build_number}"
+
+  add_git_tag(tag: tag)
+  push_git_tags(tag: tag)
+end

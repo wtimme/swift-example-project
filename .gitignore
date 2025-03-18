@@ -1,0 +1,23 @@
+xcuserdata/
+
+# The lockfile for Homebrew
+Brewfile.lock.json
+
+# Xcode projects and `Info.plist` files are generated with XcodeGen.
+# They therefore do not need to be tracked via Git.
+*.xcodeproj/
+Info.plist
+
+# Build artifacts
+*.ipa
+*.dSYM.zip
+
+# Ruby Gems that are installed locally
+vendor/
+
+# Fastlane
+fastlane/report.xml
+fastlane/test_output
+
+# macOS stuff
+.DS_Store

@@ -1,0 +1,22 @@
+name: Release (Alpha)
+ 
+on:
+  workflow_dispatch:
+    inputs:
+      git-ref:
+        description: 'The Git reference to release from'
+        type: string
+        required: true
+        default: 'main'
+  schedule:
+    # At 07:00 on every day-of-week from Monday through Friday
+    - cron: '0 7 * * 1-5'
+ 
+jobs:
+  run_create_and_upload_testflight_build:
+    name: Create and upload TestFlight build
+    uses: ./.github/workflows/reusable-setup-project-and-run-command.yml
+    secrets: inherit
+    with:
+      run-command: bundle exec fastlane create_and_upload_testflight_build
+      git-ref: ${{ inputs.git-ref || 'main' }}

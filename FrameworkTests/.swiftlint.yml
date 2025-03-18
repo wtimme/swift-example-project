@@ -1,0 +1,7 @@
+parent_config: ../.swiftlint.yml
+disabled_rules:
+  - type_body_length
+  - todo
+  - line_length
+function_body_length:
+  warning: 75

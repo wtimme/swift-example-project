@@ -1,0 +1,11 @@
+sources:
+  - ../../App
+  - ../../AppTests
+  - ../../Framework
+  - ../../FrameworkTests
+  - ../../FrameworkTestHelpers
+  - ../../TestHelpers
+templates:
+  - ./mocks.stencil
+output:
+  ./output

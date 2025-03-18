@@ -1,0 +1,54 @@
+name: Setup project and run command
+
+on:
+  workflow_call:
+    inputs:
+      run-command:
+        description: 'The command to run after setting up the project'
+        required: true
+        type: string
+      git-ref:
+        description: 'The Git reference to checkout'
+        type: string
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  setup_and_run:
+    name: Setup and run
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git-ref == '' && github.ref || inputs.git-ref }}
+      - name: Set up Ruby and install Gems
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+      - name: Use Xcode 16.2
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app
+      - name: Install dependencies from Homebrew
+        run: brew bundle
+      - name: Generate Xcode project using XcodeGen
+        run: xcodegen
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.FASTLANE_MATCH_AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.FASTLANE_MATCH_AWS_REGION }}
+      - name: Run command
+        env:
+          FASTLANE_HIDE_CHANGELOG: 1
+          APP_STORE_CONNECT_API_KEY_CONTENT: "${{ secrets.APP_STORE_CONNECT_API_KEY }}"
+          MATCH_PASSWORD: "${{ secrets.FASTLANE_MATCH_PASSWORD }}"
+        run: ${{ inputs.run-command }}
+      - name: Ensure that the mocks have not been updated
+        run: |
+          if [[ $(git status --porcelain --untracked-files=no | grep Mocks | wc -l) -gt 0 ]]; then
+            echo "It seems that running the build modified the mocks."
+            echo "Please update the mocks locally and commit the changes."
+            exit 1
+          fi

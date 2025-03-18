@@ -1,0 +1,5 @@
+strings:
+  inputs: ../../../App/Resources/generated.strings
+  outputs:
+    templatePath: ./strings-to-swift.stencil
+    output: ../../../App/Resources/L10n.swift

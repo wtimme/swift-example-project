@@ -1,0 +1,5 @@
+storage_mode("s3")
+s3_region("eu-central-1")
+s3_bucket("my-context-name.prod")
+s3_object_prefix("app/")
+team_id("AA0A00A0AA")

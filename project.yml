@@ -1,0 +1,174 @@
+name: ExampleProject
+options:
+  bundleIdPrefix: de.wtimme.example
+  deploymentTarget:
+    iOS: 17.2
+  postGenCommand: xcodebuild -resolvePackageDependencies -quiet
+settings:
+  base:
+    GENERATE_INFOPLIST_FILE: true
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 1.0
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: true
+    LOCALIZED_STRING_SWIFTUI_SUPPORT: false
+    CODE_SIGN_STYLE: Manual
+targets:
+  App:
+    type: application
+    platform: iOS
+    dependencies:
+      - target: Framework
+    scheme:
+      testTargets:
+        - AppTests
+      gatherCoverageData: true
+      coverageTargets:
+        - App
+    sources: 
+      - path: App
+        excludes:
+          - Info.plist
+    info:
+      path: App/Info.plist
+      properties:
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_ASSET_PATHS: "\"App/Development Assets\""
+        ENABLE_PREVIEWS: true
+        ENABLE_USER_SCRIPT_SANDBOXING: false
+        INFOPLIST_KEY_UIRequiresFullScreen: true
+        TARGETED_DEVICE_FAMILY: 1,2
+        INFOPLIST_KEY_UIUserInterfaceStyle: Light
+    buildToolPlugins:
+      - plugin: SwiftLintBuildToolPlugin
+        package: SwiftLint
+    preBuildScripts:
+      - name: Update mocks
+        basedOnDependencyAnalysis: false
+        script: |
+          if [[ "$(uname -m)" == arm64 ]]; then
+            export PATH="/opt/homebrew/bin:$PATH"
+          fi
+
+          ./tooling/generate-mocks.sh
+      - name: Update Swift code from string catalog
+        basedOnDependencyAnalysis: false
+        script: |
+          if [[ ! -z "$CI" ]]; then
+            # Skip updating the Swift code when running on CI
+            exit 0
+          fi
+          
+          if [[ "$(uname -m)" == arm64 ]]; then
+            export PATH="/opt/homebrew/bin:$PATH"
+          fi
+
+          ./tooling/SwiftGen/strings/generate-code-from-strings-catalog.sh
+  AppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: AppTests
+        excludes:
+          - .swiftlint.yml
+          - .swiftformat
+    dependencies:
+      - target: App
+      - target: TestHelpers
+      - target: FrameworkTestHelpers
+      - package: ViewInspector
+      - package: SnapshotTesting
+    buildToolPlugins:
+      - plugin: SwiftLintBuildToolPlugin
+        package: SwiftLint
+  Framework:
+    type: framework
+    platform: iOS
+    scheme:
+      testTargets:
+        - FrameworkTests
+      gatherCoverageData: true
+      coverageTargets:
+        - Framework
+    sources: 
+      - path: Framework
+        excludes:
+          - .swiftlint.yml
+    settings:
+      base:
+        ENABLE_MODULE_VERIFIER: true
+        MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS: gnu11 gnu++14
+    buildToolPlugins:
+      - plugin: SwiftLintBuildToolPlugin
+        package: SwiftLint
+    preBuildScripts:
+      - name: Update mocks
+        basedOnDependencyAnalysis: false
+        script: |
+          if [[ "$(uname -m)" == arm64 ]]; then
+            export PATH="/opt/homebrew/bin:$PATH"
+          fi
+
+          ./tooling/generate-mocks.sh
+  FrameworkTestHelpers:
+    type: framework
+    platform: iOS
+    sources:
+      - path: FrameworkTestHelpers
+        excludes:
+          - .swiftlint.yml
+          - Mocks/.swiftlint.yml
+    settings:
+      base:
+        ENABLE_MODULE_VERIFIER: true
+        MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS: gnu11 gnu++14
+    dependencies:
+      - target: Framework
+      - sdk: Platforms/iPhoneOS.platform/Developer/Library/Frameworks/XCTest.framework
+        root: DEVELOPER_DIR
+    buildToolPlugins:
+      - plugin: SwiftLintBuildToolPlugin
+        package: SwiftLint
+  FrameworkTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: FrameworkTests
+        excludes:
+          - .swiftlint.yml
+    dependencies:
+      - target: TestHelpers
+      - target: Framework
+      - target: FrameworkTestHelpers
+    buildToolPlugins:
+      - plugin: SwiftLintBuildToolPlugin
+        package: SwiftLint
+  TestHelpers:
+    type: framework
+    platform: iOS
+    sources:
+      - path: TestHelpers
+        excludes:
+          - .swiftlint.yml
+    dependencies:
+      - sdk: Platforms/iPhoneOS.platform/Developer/Library/Frameworks/XCTest.framework
+        root: DEVELOPER_DIR
+    settings:
+      base:
+        ENABLE_MODULE_VERIFIER: true
+        MODULE_VERIFIER_SUPPORTED_LANGUAGE_STANDARDS: gnu11 gnu++14
+    buildToolPlugins:
+      - plugin: SwiftLintBuildToolPlugin
+        package: SwiftLint
+packages:
+  ViewInspector:
+    url: https://github.com/nalexn/ViewInspector
+    exactVersion: 0.10.0
+  SnapshotTesting:
+    url: https://github.com/pointfreeco/swift-snapshot-testing
+    from: 1.17.4
+  SwiftLint:
+    url: https://github.com/realm/SwiftLint.git
+    from: 0.57.0

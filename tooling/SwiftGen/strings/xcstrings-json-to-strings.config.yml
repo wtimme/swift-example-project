@@ -1,0 +1,6 @@
+json:
+  inputs: ../../../App/Resources
+  filter: .+\.xcstrings$
+  outputs:
+    templatePath: ./xcstrings-json-to-strings.stencil
+    output: ../../../App/Resources/generated.strings

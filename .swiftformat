@@ -1,0 +1,4 @@
+--header strip
+--maxwidth 120
+--disable wrapMultilineStatementBraces
+--exclude tooling/sourcery/output

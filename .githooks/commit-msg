@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+
+# This hook attempts to parse the ID of the Jira issue from the branch name
+# and, if found, automatically adds it as a prefix to the commit message
+# that the developer provided.
+
+COMMIT_FILE=$1
+COMMIT_MSG=$(cat $1)
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+JIRA_ID_WITH_POTENTIAL_LEADING_SLASH=$(echo "$CURRENT_BRANCH" | grep -Eo "\/?[A-Za-z]+-[0-9]+" | head -1 | tr '[a-z]' '[A-Z]')
+if [[ $JIRA_ID_WITH_POTENTIAL_LEADING_SLASH = /* ]]
+then
+  # Remove the leading slash
+  JIRA_ID=$(echo "$JIRA_ID_WITH_POTENTIAL_LEADING_SLASH" | cut -d '/' -f2)
+else
+  JIRA_ID=$JIRA_ID_WITH_POTENTIAL_LEADING_SLASH
+fi
+
+JIRA_ID_FROM_COMMIT_MESSAGE=$(echo "$COMMIT_MSG" | head -1 | grep -Eo "^[A-Za-z]+-\d+")
+
+# Regular expression that matches commit messages of merge commits
+START_OF_MERGE_COMMIT_REGEX="^Merge branch '|^Merge remote-tracking branch '"
+
+if [[ $(echo "$COMMIT_MSG" | head -1) =~ $START_OF_MERGE_COMMIT_REGEX ]]; then
+  # Looks like this is a merge commit. Do not add the Jira issue ID to the message.
+  echo "Merge commit detected. Skipping commit-msg Git hook."
+elif [ ! -z "$JIRA_ID_FROM_COMMIT_MESSAGE" ]; then
+  # The commit message already contains an issue ID.
+  # Nothing to do here.
+  echo "The commit message contains an issue ID ($JIRA_ID_FROM_COMMIT_MESSAGE). Good job!"
+elif [ ! -z "$JIRA_ID" ]; then
+  # The commit message is lacking an issue ID, but the branch contains one.
+  # Prefix the given commit message with the issue ID.
+  echo "$JIRA_ID $COMMIT_MSG" > "$COMMIT_FILE"
+
+  echo "JIRA ID '$JIRA_ID', matched in current branch name, prepended to commit message. (Use --no-verify to skip)"
+fi
