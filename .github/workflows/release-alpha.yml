@@ -8,9 +8,9 @@ on:
         type: string
         required: true
         default: 'main'
-  schedule:
-    # At 07:00 on every day-of-week from Monday through Friday
-    - cron: '0 7 * * 1-5'
+  # schedule:
+  #   # At 07:00 on every day-of-week from Monday through Friday
+  #   - cron: '0 7 * * 1-5'
  
 jobs:
   run_create_and_upload_testflight_build:
